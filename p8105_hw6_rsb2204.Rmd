@@ -66,14 +66,14 @@ Running a `glm` for each city in the dataset and extracting the adjusted odds ra
 homicide_data %>%
   nest(data=-city_state)%>%
   mutate(
-    models = map(data, ~glm(resolved ~ victim_race + victim_sex, data = homicide_data, family = binomial())),
+    models = map(data, ~glm(resolved ~ victim_race + victim_sex + victim_age, data = homicide_data, family = binomial())),
     results = map(models, broom::tidy)) %>%
   select(-data, -models)%>%
   unnest(results)%>%
 mutate(OR = exp(estimate)) %>% # figure out CI calculations for OR??
+    filter(term=="victim_sexMale")%>%
   mutate(CI.low = OR - std.error*1.96, CI.high = OR + std.error*1.96)%>%
   select(city_state, term, log_OR = estimate, OR, CI.low, CI.high) %>% 
-  #filter(term=="victim_sexMale")%>%
   knitr::kable(digits = 3)
   
 ```
