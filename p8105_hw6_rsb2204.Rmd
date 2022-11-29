@@ -117,6 +117,8 @@ birthweight =
   )
 ```
 
+The birthweight dataset contains information that allows us to understand the effects of several variable such as a baby's sex, head circumference at birth, length at birth, birth weight, mother's weight at delivery, family monthly income etc on a child's birthweight. We first clean the data using `janitor::clean_names()`. For the purpose of our regression analysis, we convert the variables of `babysex`, frace`, `malform`, and `mrace` to factor variables. They are present in the intial dataset as categorical variables and their numeric coded values are not as intuitive to analysis as the recoded factor variables would be. 
+
 Checking for missing values:
 ```{r}
 birthweight%>%
@@ -127,44 +129,31 @@ From the tibble we see that there appears to be no missing values in the data.
 
 We will use stepwise regression to determine an ideal regression model for birthweight:
 ```{r}
-intercept_lm <- lm(bwt~1, data=birthweight)
-
 all_lm <- lm(bwt~., data=birthweight)
 
 backward <- step(all_lm, direction='backward', scope=formula(all_lm), trace=0)
 
 summary(backward)
+```
 
+Steps of Modelling process:
+In order to chose the variables for our model, we use the stepwise approach which comapres successive models and identifies the best subsets. For my model I used backward elimination. For this I first started with all the predictios in the model and then removed the predictors with the highest p-value (p-value) (those which are not significant <0.05). The `step()` with the direction of 'backward' function performs this analysis as it continues to re-fit the model and remvoe the next least signficant predictor. The end results of the `step()`, the summary for the anova, shows which variables need to be removed from the model. 
+
+```{r}
 backward[["anova"]]
 
 backward %>% anova
 ```
 
-From this the proposed regression model is:
+From these results we see that the variables of `wtgain`, `pnumsga`, `pnumlbw`, `frace`, `malform`, `ppbmi`, `momage`, and `menarche` can be removed from our model. 
+Looking at the p-values we see that `babysex`, `bhead`, `blength`,  `delwt`, `fincome`, `gaweeks`,  `mheight`, `mrace`, `parity`, `ppwt` and `smoken` are significant at an alpha = 0.05 significance level and we will include these predictors in our model.
 
+Using stepwise backward the chosen model is regression model is, this will be my proposed regression model:
 ```{r}
-stepwise_lm <- lm(bwt~babysex + bhead + blength + delwt + fincome + gaweeks + mheight + mrace + parity + ppwt + smoken, data=birthweight)
-
-summary(stepwise_lm)
-```
-
-As we see that `fincome` and `mrace` are only significant for a significance level of 0.1, we remove them from the model.
-
-Now the model is:
-```{r}
-removal_lm <- lm(bwt~babysex + bhead + blength + delwt + gaweeks + mheight + parity + ppwt + smoken, data=birthweight)
-
-summary(removal_lm)
-```
-
-Here we see that the p-value of parity is 0.016893 which is larger than the other p-values and hence will test out removing the variable from our proposed model.
-
-```{r}
-birthweight_lm <- lm(bwt~babysex + bhead + blength + delwt + gaweeks + mheight + ppwt + smoken, data=birthweight)
+birthweight_lm <- lm(bwt~babysex + bhead + blength + delwt + fincome + gaweeks + mheight + mrace + parity + ppwt + smoken, data=birthweight)
 
 summary(birthweight_lm)
 ```
-Here all the variables are siginificant and the p-value < 0.
 
 Here we can see summary statistics about the model including AIC and BIC values:
 ```{r}
@@ -216,7 +205,7 @@ cv_df =
 cv_df = 
   cv_df %>% 
   mutate(
-    birthweight_lm  = map(train, ~lm(bwt~babysex + bhead + blength + delwt + gaweeks + mheight + ppwt + smoken, data=.x)),
+    birthweight_lm  = map(train, ~lm(bwt~babysex + bhead + blength + delwt + fincome + gaweeks + mheight + mrace + parity + ppwt + smoken, data=.x)),
     model1    = map(train, ~lm(bwt ~ blength + gaweeks, data=.x)),
     model2  = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead*blength + bhead*babysex + blength*babysex + bhead*blength*blength, data=.x))) %>% 
   mutate(
@@ -238,4 +227,4 @@ cv_df %>%
   ggplot(aes(x = model, y = rmse)) + geom_violin()
 ```
 
-From these results there is clearly improvement in predictive accuracy gained through my proposed regression model in comparison to model 1 and model 2, as my model produces the lowest cross validated prediction error. In terms of ranking from lowest to highest prediction error it would first be my model, then model 2, then model 1. 
+From these results there is clearly an improvement in predictive accuracy gained through my proposed regression model in comparison to model 1 and model 2, as my model produces the lowest cross validated prediction error. In terms of ranking from lowest to highest prediction error it would first be my model, then model 2, then model 1. 
