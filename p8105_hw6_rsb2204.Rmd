@@ -33,11 +33,14 @@ Creating a `city_state` variable and a binary variable `resolved` to indicate wh
 ```{r}
 homicide_data = read_csv("data/homicide-data.csv") %>%
   janitor::clean_names() %>%
-  mutate(city_state = str_c(city,    state, sep=", "), resolved = as.numeric(disposition == "Closed by arrest"))%>%
-  filter(city_state !="Dallas, TX" | city_state !="Phoenix, AZ" | city_state!="Kansas City, MO" | city_state != "Tulsa, AL", victim_race == "White" | victim_race == "Black") %>%
+  mutate(city_state = str_c(city,state, sep=", "), resolved = as.numeric(disposition == "Closed by arrest"))%>%
+  filter(city_state !="Dallas, TX" | city_state !="Phoenix, AZ" | city_state!="Kansas City, MO", victim_race == "White" | victim_race == "Black") %>%
+  filter(city_state != "Tulsa, AL") %>%
   mutate(victim_age = as.numeric(victim_age), victim_race = fct_relevel(victim_race, "White"))%>%
   select(city_state, victim_sex, resolved, victim_age, victim_race)
 
+homicide_data %>% 
+  summarise(n = sum(is.na(victim_age)))
 ```
 
 For the city of Baltimore, MD we use the `glm` function to fit a logistic regression with resolved vs unsolved as the outcome and victim age, sex and race as predictors, saving the results as an R object. 
@@ -50,35 +53,43 @@ fit_logistic = homicide_data %>%
 Displaying the estimate and the confidence interval of the adjusted odds ratio for solving homicides comparing male victims to female victims keeping all other variables fixed.
 ```{r}
 fit_logistic %>% 
-  broom::tidy() %>% 
-  mutate(OR = exp(estimate)) %>% # figure out CI calculations for OR??%>%
+  broom::tidy(conf.int=TRUE) %>% 
+  mutate(OR = exp(estimate)) %>% 
    filter(term=="victim_sexMale")%>%
-  mutate(CI.low = OR - std.error*1.96, CI.high = OR + std.error*1.96)%>%
+  mutate(CI.low = exp(conf.low), CI.high = exp(conf.high))%>%
   select(term, log_OR = estimate, OR, CI.low, CI.high) %>% 
   knitr::kable(digits = 3)
 ```
 
-Running a `glm` for each city in the dataset and extracting the adjusted odds ratio and CI for solving homicides comparing male victims to female victims. Creating a dataframe with estimated ORs and CIs for each city: 
+As this is a logistic regression we must remember to convert our OR back to an exponential from its log value and to do the same for the confidence interval values which we do using mutate().
 
+Running a `glm` for each city in the dataset and extracting the adjusted odds ratio and CI for solving homicides comparing male victims to female victims. Creating a dataframe with estimated ORs and CIs for each city: 
 ```{r}
-# fix this entirely
-homicide_data %>%
+citiesOR_df = homicide_data %>%
   nest(data=-city_state)%>%
   mutate(
-    models = map(data, ~glm(resolved ~ victim_race + victim_sex + victim_age, data=homicide_data, family = binomial()), na.action="na.omit"),
-    results = map(models, broom::tidy)) %>%
+    models = map(data, ~glm(resolved ~ victim_race + victim_sex + victim_age, data=.x, family = binomial()), na.action="na.exclude"),
+    results = map(models, ~broom::tidy(x=.x, conf.int=T))) %>%
   select(-data, -models)%>%
   unnest(results)%>%
-mutate(OR = exp(estimate)) %>% # figure out CI calculations for OR??
+mutate(OR = exp(estimate)) %>%
     filter(term=="victim_sexMale")%>%
-  mutate(CI.low = OR - std.error*1.96, CI.high = OR + std.error*1.96)%>%
-  select(city_state, term, log_OR = estimate, OR, CI.low, CI.high) %>% 
-  knitr::kable(digits = 3)
+  mutate(CI.low = exp(conf.low), CI.high = exp(conf.high))%>%
+  select(city_state, term, log_OR = estimate, OR, CI.low, CI.high)
   
 ```
 
+Plot that shows the estimated ORs and CIs for each city:
+```{r}
+citiesOR_df %>%
+mutate(city_state = fct_reorder(city_state, OR))%>%
+ggplot(aes(x=city_state, y=OR))+
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+geom_errorbar(aes(ymin=CI.low, ymax=CI.high))
+```
 
-
+From the plot we see that New York has the lowest odds ratio for solving homicides comparing male to female victims. The adjusted odds ratio is below 1 for the majority of cities which means the odds of solving a homicide in female victims is higher than in male victims. Albuquerque has the highest odds ratio where the estimated odds of a homicide being solved where there is male victim is  1.67 times the odds of a homicide being solved where there is a female victim. It is interesting to see these results as the majority of homicide victims are men.
 
 ### Problem 3
 
