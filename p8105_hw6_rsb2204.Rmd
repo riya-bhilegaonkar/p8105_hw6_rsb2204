@@ -37,7 +37,6 @@ homicide_data = read_csv("data/homicide-data.csv") %>%
   filter(city_state !="Dallas, TX" | city_state !="Phoenix, AZ" | city_state!="Kansas City, MO" | city_state != "Tulsa, AL", victim_race == "White" | victim_race == "Black") %>%
   mutate(victim_age = as.numeric(victim_age), victim_race = fct_relevel(victim_race, "White"))%>%
   select(city_state, victim_sex, resolved, victim_age, victim_race)
-View(homicide_data)
 
 ```
 
@@ -62,11 +61,11 @@ fit_logistic %>%
 Running a `glm` for each city in the dataset and extracting the adjusted odds ratio and CI for solving homicides comparing male victims to female victims. Creating a dataframe with estimated ORs and CIs for each city: 
 
 ```{r}
-## fix this entirely
+# fix this entirely
 homicide_data %>%
   nest(data=-city_state)%>%
   mutate(
-    models = map(data, ~glm(resolved ~ victim_race + victim_sex + victim_age, data = homicide_data, family = binomial())),
+    models = map(data, ~glm(resolved ~ victim_race + victim_sex + victim_age, data=homicide_data, family = binomial()), na.action="na.omit"),
     results = map(models, broom::tidy)) %>%
   select(-data, -models)%>%
   unnest(results)%>%
@@ -82,3 +81,161 @@ mutate(OR = exp(estimate)) %>% # figure out CI calculations for OR??
 
 
 ### Problem 3
+
+Loading and cleaning the data for regression analysis:
+```{r}
+birthweight = 
+   read_csv("./data/birthweight.csv") %>%
+  janitor::clean_names()%>%
+  mutate(babysex = recode(
+    babysex,
+    "1" = "male",
+    "2" = "female"
+  ),
+  frace = recode(
+    frace,
+    "1" = "White",
+    "2" = "Black",
+    "3" = "Asian",
+    "4" = "Puerto Rican",
+    "8" = "Other",
+    "9" = "Unknown"
+  ),
+  malform = recode(
+    malform,
+    "0" = "absent",
+    "1" = "present"
+  ),
+  mrace = recode(
+    mrace,
+    "1" = "White",
+    "2" = "Black",
+    "3" = "Asian",
+    "4" = "Puerto Rican",
+    "8" = "Other"
+  )
+  )
+```
+
+Checking for missing values:
+```{r}
+birthweight%>%
+  summarise(N_A = sum(is.na(birthweight)))
+```
+
+From the tibble we see that there appears to be no missing values in the data. 
+
+We will use stepwise regression to determine an ideal regression model for birthweight:
+```{r}
+intercept_lm <- lm(bwt~1, data=birthweight)
+
+all_lm <- lm(bwt~., data=birthweight)
+
+backward <- step(all_lm, direction='backward', scope=formula(all_lm), trace=0)
+
+summary(backward)
+
+backward[["anova"]]
+
+backward %>% anova
+```
+
+From this the proposed regression model is:
+
+```{r}
+stepwise_lm <- lm(bwt~babysex + bhead + blength + delwt + fincome + gaweeks + mheight + mrace + parity + ppwt + smoken, data=birthweight)
+
+summary(stepwise_lm)
+```
+
+As we see that `fincome` and `mrace` are only significant for a significance level of 0.1, we remove them from the model.
+
+Now the model is:
+```{r}
+removal_lm <- lm(bwt~babysex + bhead + blength + delwt + gaweeks + mheight + parity + ppwt + smoken, data=birthweight)
+
+summary(removal_lm)
+```
+
+Here we see that the p-value of parity is 0.016893 which is larger than the other p-values and hence will test out removing the variable from our proposed model.
+
+```{r}
+birthweight_lm <- lm(bwt~babysex + bhead + blength + delwt + gaweeks + mheight + ppwt + smoken, data=birthweight)
+
+summary(birthweight_lm)
+```
+Here all the variables are siginificant and the p-value < 0.
+
+Here we can see summary statistics about the model including AIC and BIC values:
+```{r}
+birthweight_lm %>%
+  broom::glance()%>%
+  knitr::kable()
+```
+
+Plot of model residuals against fitted values:
+```{r}
+birthweight %>% 
+modelr::add_residuals(birthweight_lm) %>%
+modelr::add_predictions(birthweight_lm) %>% 
+  ggplot(aes(x = pred, 
+             y = resid)) +
+  geom_point(alpha=0.4) +
+  geom_smooth(method = "lm",
+              se = FALSE) +
+  labs(
+    x = "fitted values",
+    y = "residuals",
+    title = "Plot of model residuals against fitted values")
+```
+
+Comparing the proposed regression model against two others:
+
+(a) One using length at birth and gestational age as predictors (main effects only)
+```{r}
+model1 = lm(bwt ~ blength + gaweeks, data=birthweight)
+```
+
+(b) One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
+
+```{r}
+model2 = lm(bwt ~ bhead + blength + babysex + bhead*blength + bhead*babysex + blength*babysex + bhead*blength*blength, data=birthweight)
+```
+
+Using cross-validated prediction errors to make the comparison:
+
+```{r}
+cv_df =
+  modelr::crossv_mc(birthweight, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))
+```
+
+```{r}
+cv_df = 
+  cv_df %>% 
+  mutate(
+    birthweight_lm  = map(train, ~lm(bwt~babysex + bhead + blength + delwt + gaweeks + mheight + ppwt + smoken, data=.x)),
+    model1    = map(train, ~lm(bwt ~ blength + gaweeks, data=.x)),
+    model2  = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead*blength + bhead*babysex + blength*babysex + bhead*blength*blength, data=.x))) %>% 
+  mutate(
+    rmse_birthweight = map2_dbl(birthweight_lm, test, ~modelr::rmse(model = .x, data = .y)),
+    rmse_model1    = map2_dbl(model1, test, ~modelr::rmse(model = .x, data = .y)),
+    rmse_model2 = map2_dbl(model2, test, ~modelr::rmse(model = .x, data = .y)))
+
+```
+
+```{r}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>%
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
+```
+
+From these results there is clearly improvement in predictive accuracy gained through my proposed regression model in comparison to model 1 and model 2, as my model produces the lowest cross validated prediction error. In terms of ranking from lowest to highest prediction error it would first be my model, then model 2, then model 1. 
